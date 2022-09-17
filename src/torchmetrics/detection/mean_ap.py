@@ -467,18 +467,15 @@ class MeanAveragePrecision(Metric):
         gt = [gt[i] for i in gt_label_mask]
         det = [det[i] for i in det_label_mask]
 
-        if len(gt) == 0 or len(det) == 0:
-            return Tensor([])
-
         # Sort by scores and use only max detections
         scores = self.detection_scores[idx]
         scores_filtered = scores[self.detection_labels[idx] == class_id]
         inds = torch.argsort(scores_filtered, descending=True)
 
         # TODO Fix (only for masks is necessary)
+        if len(inds) > max_det:
+            inds = inds[:max_det]
         det = [det[i] for i in inds]
-        if len(det) > max_det:
-            det = det[:max_det]
 
         ious = compute_iou(det, gt, self.iou_type).to(self.device)
         return ious
@@ -579,8 +576,6 @@ class MeanAveragePrecision(Metric):
 
         gt = [gt[i] for i in gt_label_mask]
         det = [det[i] for i in det_label_mask]
-        if len(gt) == 0 and len(det) == 0:
-            return None
         if isinstance(det, dict):
             det = [det]
         if isinstance(gt, dict):
@@ -591,27 +586,25 @@ class MeanAveragePrecision(Metric):
         ignore_area = torch.logical_or(areas < area_range[0], areas > area_range[1])
 
         # sort dt highest score first, sort gt ignore last
-        ignore_area_sorted, gtind = torch.sort(ignore_area.to(torch.uint8))
+        gt_ignore, gtind = torch.sort(ignore_area.to(torch.uint8))
         # Convert to uint8 temporarily and back to bool, because "Sort currently does not support bool dtype on CUDA"
 
-        ignore_area_sorted = ignore_area_sorted.to(torch.bool).to(self.device)
+        gt_ignore = gt_ignore.to(torch.bool).to(self.device)
 
         gt = [gt[i] for i in gtind]
         scores = self.detection_scores[idx]
         scores_filtered = scores[det_label_mask]
         scores_sorted, dtind = torch.sort(scores_filtered, descending=True)
+        if len(dtind) > max_det:
+            dtind = dtind[:max_det]
         det = [det[i] for i in dtind]
-        if len(det) > max_det:
-            det = det[:max_det]
         # load computed ious
         ious = ious[idx, class_id][:, gtind] if len(ious[idx, class_id]) > 0 else ious[idx, class_id]
 
-        nb_iou_thrs = len(self.iou_thresholds)
         nb_gt = len(gt)
         nb_det = len(det)
         gt_matches = torch.zeros((nb_iou_thrs, nb_gt), dtype=torch.bool, device=self.device)
         det_matches = torch.zeros((nb_iou_thrs, nb_det), dtype=torch.bool, device=self.device)
-        gt_ignore = ignore_area_sorted
         det_ignore = torch.zeros((nb_iou_thrs, nb_det), dtype=torch.bool, device=self.device)
 
         if torch.numel(ious) > 0:
